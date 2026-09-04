@@ -27,5 +27,5 @@ ranking_qbs = (
     .sort("epa_medio", descending=True)
 )
 
-print("\n--- TOP 10 QUARTERBACKS DE 2025 (Por Eficiência - EPA/play) ---")
+print("\n--- TOP 10 QUARTERBACKS DE 2025 (Por Eficiência Aérea) ---")
 print(ranking_qbs.head(10))
