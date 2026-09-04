@@ -34,8 +34,10 @@ A aplicação foi desenhada para processamento ultra-rápido de dados em memóri
 
 ```text
 nfl_analytics/
-├── app.py                 # Aplicação principal Streamlit (Interface e rankings)
-├── 01_ranking_qb.py       # Script de teste/laboratório para agregação de QBs
-├── 04_ranking_rb.py       # Script de teste/laboratório para agregação de RBs
-├── requirements.txt       # Dependências do projeto
-└── README.md              # Documentação do repositório
+├── 01_explorando_dados.py  # Script de exploração inicial do dataset
+├── 02_ranking_qbs.py       # Laboratório de agregação e ranking de QBs
+├── 03_grafico_qbs.py       # Testes de visualização e gráficos de QBs
+├── 04_ranking_rb.py        # Laboratório de agregação e ranking de RBs
+├── app.py                  # Aplicação principal Streamlit (Dashboard)
+├── teste.py                # Script de testes pontuais
+└── README.md               # Documentação do repositório
