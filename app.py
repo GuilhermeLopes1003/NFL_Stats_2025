@@ -1,82 +1,98 @@
 import streamlit as st
 import nflreadpy as nfl
 import polars as pl
-import plotly.express as px
 
-# Configuração da página Web
-st.set_page_config(page_title="NFL Analytics - Dashboard QBs", layout="wide")
+# 1. Configuração da página do navegador
+st.set_page_config(page_title="NFL Analytics Dashboard", layout="wide")
 
-st.title("🏈 Dashboard de Eficiência dos Quarterbacks")
-st.markdown("Análise comparativa de **Eficiência (EPA/play)** e **Precisão (CPOE)** usando dados do `nflreadpy`.")
+st.title("🏈 Dashboard de Performance da NFL")
 
-# --- BARRA LATERAL (FILTROS) ---
-st.sidebar.header("Filtros da Análise")
-
-# Filtro de Ano
-ano = st.sidebar.selectbox("Selecione a Temporada", [2025, 2024, 2023], index=0)
-
-# Filtro de Volume Mínimo de Passes
-min_passes = st.sidebar.slider("Mínimo de passes tentados", min_value=20, max_value=400, value=100, step=10)
-
-# --- CARREGAMENTO DE DADOS (COM CACHE) ---
+# 2. Carregamento de dados com Cache (para resposta instantânea)
 @st.cache_data
-def carregar_dados_pbp(temporada):
-    return nfl.load_pbp([temporada])
-
-with st.spinner("Carregando dados da NFL..."):
-    pbp = carregar_dados_pbp(ano)
-
-# --- PROCESSAMENTO DOS DADOS COM POLARS ---
-ranking_qbs = (
-    pbp
-    .filter(
-        (pl.col("play_type") == "pass") & 
-        (pl.col("passer_player_name").is_not_null())
-    )
-    .group_by(["passer_player_name", "posteam"])
-    .agg([
-        pl.len().alias("total_passes"),
-        pl.col("epa").mean().alias("epa_medio"),
-        pl.col("cpoe").mean().alias("cpoe_medio"),
-        pl.col("yards_gained").sum().alias("total_jardas")
-    ])
-    .filter(pl.col("total_passes") >= min_passes)
-)
-
-df_plot = ranking_qbs.to_pandas()
-
-# --- LAYOUT DO DASHBOARD (2 COLUNAS) ---
-col_grafico, col_tabela = st.columns([2, 1])
-
-with col_grafico:
-    st.subheader(f"Gráfico de Desempenho ({ano})")
+def carregar_dados():
+    pbp = nfl.load_pbp([2025])
+    rosters = nfl.load_rosters([2025])
     
-    fig = px.scatter(
-        df_plot,
-        x="cpoe_medio",
-        y="epa_medio",
-        text="passer_player_name",
-        size="total_passes",
-        color="epa_medio",
-        color_continuous_scale="RdYlGn",
-        labels={
-            "cpoe_medio": "Precisão (%) - CPOE Médio",
-            "epa_medio": "Eficiência - EPA Médio por Jogada"
-        }
+    # Lista de IDs de RBs oficiais
+    ids_rbs = (
+        rosters
+        .filter(pl.col("position") == "RB")
+        .select("gsis_id")
+        .to_series()
+        .to_list()
     )
-    fig.update_traces(textposition="top center")
-    fig.add_hline(y=df_plot["epa_medio"].mean(), line_dash="dash", line_color="gray")
-    fig.add_vline(x=df_plot["cpoe_medio"].mean(), line_dash="dash", line_color="gray")
-    
-    # Atualizado com o parâmetro 'width'
-    st.plotly_chart(fig, width="stretch")
+    return pbp, ids_rbs
 
-with col_tabela:
-    st.subheader("Top QBs por EPA")
-    tabela_exibicao = (
-        ranking_qbs
+pbp, ids_rbs = carregar_dados()
+
+# 3. Criação das Abas do App
+aba_qbs, aba_rbs = st.tabs(["🎯 Quarterbacks (Passo)", "🏃 Running Backs (Corrida)"])
+
+# --- ABA 1: QUARTERBACKS ---
+with aba_qbs:
+    st.header("Ranking de Quarterbacks")
+    
+    # Barra interativa para controlar o limite de passes
+    min_passes = st.slider(
+        "Mínimo de passes tentados na temporada:", 
+        min_value=50, 
+        max_value=500, 
+        value=200, 
+        step=25
+    )
+    
+    # Processamento Polars para QBs
+    ranking_qbs = (
+        pbp
+        .filter(
+            (pl.col("play_type") == "pass") & 
+            (pl.col("passer_player_name").is_not_null())
+        )
+        .group_by(["passer_player_name", "posteam"])
+        .agg([
+            pl.len().alias("total_passes"),
+            pl.col("epa").gt(0).mean().alias("taxa_sucesso"),
+            pl.col("epa").mean().alias("epa_medio"),
+            pl.col("pass_touchdown").sum().alias("total_tds"),
+            pl.col("yards_gained").sum().alias("total_jardas")
+        ])
+        .filter(pl.col("total_passes") >= min_passes)
         .sort("epa_medio", descending=True)
-        .select(["passer_player_name", "posteam", "epa_medio", "total_passes"])
     )
-    # Atualizado com o parâmetro 'width'
-    st.dataframe(tabela_exibicao.to_pandas(), width="stretch")
+    
+    st.dataframe(ranking_qbs, use_container_width=True)
+
+# --- ABA 2: RUNNING BACKS ---
+with aba_rbs:
+    st.header("Ranking de Running Backs")
+    
+    # Barra interativa para controlar o limite de corridas
+    min_corridas = st.slider(
+        "Mínimo de corridas na temporada:", 
+        min_value=20, 
+        max_value=250, 
+        value=100, 
+        step=10
+    )
+    
+    # Processamento Polars para RBs
+    ranking_rbs = (
+        pbp
+        .filter(
+            (pl.col("play_type") == "run") & 
+            (pl.col("rusher_player_name").is_not_null()) &
+            (pl.col("rusher_player_id").is_in(ids_rbs))
+        )
+        .group_by(["rusher_player_name", "posteam"])
+        .agg([
+            pl.len().alias("total_corridas"),
+            pl.col("epa").gt(0).mean().alias("taxa_sucesso"),
+            pl.col("epa").mean().alias("epa_medio"),
+            pl.col("rush_touchdown").sum().alias("total_tds"),
+            pl.col("yards_gained").sum().alias("total_jardas")
+        ])
+        .filter(pl.col("total_corridas") >= min_corridas)
+        .sort("taxa_sucesso", descending=True)
+    )
+    
+    st.dataframe(ranking_rbs, use_container_width=True)
