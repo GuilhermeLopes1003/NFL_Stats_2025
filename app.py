@@ -28,21 +28,30 @@ def carregar_dados():
         .to_series()
         .to_list()
     )
-    
-    return pbp, ids_rbs, ids_wrs
 
-pbp, ids_rbs, ids_wrs = carregar_dados()
+    ids_tes = (
+        rosters
+        .filter(pl.col("position") == "TE")
+        .select("gsis_id")
+        .to_series()
+        .to_list()
+    )
+    
+    return pbp, ids_rbs, ids_wrs, ids_tes
+
+pbp, ids_rbs, ids_wrs, ids_tes = carregar_dados()
 
 # 3. Criação das Abas do App
-aba_qbs, aba_rbs, aba_wrs = st.tabs([
+aba_qbs, aba_rbs, aba_wrs, aba_tes = st.tabs([
     "🎯 Quarterbacks (Passe)", 
     "🏃 Running Backs (Corrida)", 
-    "🙌 Wide Receivers (Recepção)"
+    "🙌 Wide Receivers (Recepção)",
+    "🏈 Tight Ends (Recepção)"
 ])
 
 # --- ABA 1: QUARTERBACKS ---
 with aba_qbs:
-    st.header("Ranking de Quarterbacks (Por Eficiência Aérea EPA/Jogada)")
+    st.header("Ranking de Quarterbacks")
     
     min_passes = st.slider(
         "Mínimo de passes tentados na temporada:", 
@@ -61,7 +70,6 @@ with aba_qbs:
         .group_by(["passer_player_name", "posteam"])
         .agg([
             pl.len().alias("total_passes"),
-            # Multiplicamos por 100 para transformar decimal em porcentagem
             (pl.col("epa").gt(0).mean() * 100).alias("taxa_sucesso"),
             pl.col("epa").mean().alias("epa_medio"),
             pl.col("pass_touchdown").sum().cast(pl.UInt32).alias("total_tds"),
@@ -88,7 +96,7 @@ with aba_qbs:
 
 # --- ABA 2: RUNNING BACKS ---
 with aba_rbs:
-    st.header("Ranking de Running Backs (Por Eficiência - Taxa de sucesso")
+    st.header("Ranking de Running Backs")
     
     min_corridas = st.slider(
         "Mínimo de corridas na temporada:", 
@@ -108,7 +116,6 @@ with aba_rbs:
         .group_by(["rusher_player_name", "posteam"])
         .agg([
             pl.len().alias("total_corridas"),
-            # Multiplicamos por 100 para transformar decimal em porcentagem
             (pl.col("epa").gt(0).mean() * 100).alias("taxa_sucesso"),
             pl.col("epa").mean().alias("epa_medio"),
             pl.col("rush_touchdown").sum().cast(pl.UInt32).alias("total_tds"),
@@ -135,14 +142,15 @@ with aba_rbs:
 
 # --- ABA 3: WIDE RECEIVERS ---
 with aba_wrs:
-    st.header("Ranking de Wide Receivers (Por Eficiência - Jardas por Alvo")
+    st.header("Ranking de Wide Receivers")
     
-    min_alvos = st.slider(
+    min_alvos_wr = st.slider(
         "Mínimo de alvos (targets) na temporada:", 
         min_value=20, 
         max_value=150, 
         value=100, 
-        step=5
+        step=5,
+        key="slider_wrs"
     )
     
     ranking_wrs = (
@@ -156,13 +164,12 @@ with aba_wrs:
         .agg([
             pl.len().alias("alvos"),
             pl.col("complete_pass").sum().cast(pl.UInt32).alias("recepcoes"),
-            # Multiplicamos por 100 para transformar decimal em porcentagem
             (pl.col("complete_pass").mean() * 100).alias("taxa_captura"),
             pl.col("yards_gained").filter(pl.col("complete_pass") == 1).sum().cast(pl.Int64).alias("jardas"),
             pl.col("pass_touchdown").filter(pl.col("complete_pass") == 1).sum().cast(pl.UInt32).alias("tds"),
             pl.col("epa").mean().alias("epa_medio")
         ])
-        .filter(pl.col("alvos") >= min_alvos)
+        .filter(pl.col("alvos") >= min_alvos_wr)
         .with_columns(
             (pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo")
         )
@@ -171,6 +178,59 @@ with aba_wrs:
     
     st.dataframe(
         ranking_wrs,
+        column_config={
+            "receiver_player_name": "Jogador",
+            "posteam": "Time",
+            "alvos": "Alvos",
+            "recepcoes": "Recepções",
+            "taxa_captura": st.column_config.NumberColumn("Catch %", format="%.2f%%"),
+            "jardas": "Jardas Totais",
+            "tds": "TDs",
+            "epa_medio": st.column_config.NumberColumn("EPA/Alvo", format="%.3f"),
+            "jardas_por_alvo": st.column_config.NumberColumn("YDS/Target", format="%.2f"),
+        },
+        use_container_width=True,
+        hide_index=True
+    )
+
+# --- ABA 4: TIGHT ENDS ---
+with aba_tes:
+    st.header("Ranking de Tight Ends")
+    
+    min_alvos_te = st.slider(
+        "Mínimo de alvos (targets) na temporada:", 
+        min_value=10, 
+        max_value=120, 
+        value=40, 
+        step=5,
+        key="slider_tes"
+    )
+    
+    ranking_tes = (
+        pbp
+        .filter(
+            (pl.col("play_type") == "pass") & 
+            (pl.col("receiver_player_name").is_not_null()) &
+            (pl.col("receiver_player_id").is_in(ids_tes))
+        )
+        .group_by(["receiver_player_name", "posteam"])
+        .agg([
+            pl.len().alias("alvos"),
+            pl.col("complete_pass").sum().cast(pl.UInt32).alias("recepcoes"),
+            (pl.col("complete_pass").mean() * 100).alias("taxa_captura"),
+            pl.col("yards_gained").filter(pl.col("complete_pass") == 1).sum().cast(pl.Int64).alias("jardas"),
+            pl.col("pass_touchdown").filter(pl.col("complete_pass") == 1).sum().cast(pl.UInt32).alias("tds"),
+            pl.col("epa").mean().alias("epa_medio")
+        ])
+        .filter(pl.col("alvos") >= min_alvos_te)
+        .with_columns(
+            (pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo")
+        )
+        .sort(["jardas_por_alvo", "jardas"], descending=[True, True])
+    )
+    
+    st.dataframe(
+        ranking_tes,
         column_config={
             "receiver_player_name": "Jogador",
             "posteam": "Time",
