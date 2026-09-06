@@ -2,46 +2,52 @@ import streamlit as st
 import nflreadpy as nfl
 import polars as pl
 
-# 1. Configuração da página do navegador
 st.set_page_config(page_title="NFL Analytics Dashboard", layout="wide")
 
-st.title("🏈 Dashboard de Performance da NFL")
+st.title("🏈 Dashboard de Performance da NFL (2025)")
 
-# 2. Carregamento de dados com Cache
+# 1. Carregamento dos dados
 @st.cache_data
 def carregar_dados():
     pbp = nfl.load_pbp([2025])
     rosters = nfl.load_rosters([2025])
     
-    ids_rbs = (
-        rosters
-        .filter(pl.col("position") == "RB")
-        .select("gsis_id")
-        .to_series()
-        .to_list()
-    )
-    
-    ids_wrs = (
-        rosters
-        .filter(pl.col("position") == "WR")
-        .select("gsis_id")
-        .to_series()
-        .to_list()
-    )
-
-    ids_tes = (
-        rosters
-        .filter(pl.col("position") == "TE")
-        .select("gsis_id")
-        .to_series()
-        .to_list()
-    )
+    ids_rbs = rosters.filter(pl.col("position") == "RB").select("gsis_id").to_series().to_list()
+    ids_wrs = rosters.filter(pl.col("position") == "WR").select("gsis_id").to_series().to_list()
+    ids_tes = rosters.filter(pl.col("position") == "TE").select("gsis_id").to_series().to_list()
     
     return pbp, ids_rbs, ids_wrs, ids_tes
 
 pbp, ids_rbs, ids_wrs, ids_tes = carregar_dados()
 
-# 3. Criação das Abas do App
+# 2. SEÇÃO DE FILTROS SITUACIONAIS (Topo do App)
+st.subheader("⚙️ Contexto do Game Script")
+col_f1, col_f2 = st.columns(2)
+
+with col_f1:
+    filtro_zona = st.selectbox(
+        "Zona do Campo:",
+        ["Campo Inteiro", "Red Zone (Últimas 20 jardas)"]
+    )
+
+with col_f2:
+    filtro_descida = st.selectbox(
+        "Situação de Descida (Down):",
+        ["Todas as Descidas", "Momentos Decisivos (3ª e 4ª descidas)"]
+    )
+
+# Aplicação dos filtros no DataFrame PBP
+pbp_filtrado = pbp
+
+if filtro_zona == "Red Zone (Últimas 20 jardas)":
+    pbp_filtrado = pbp_filtrado.filter(pl.col("yardline_100") <= 20)
+
+if filtro_descida == "Momentos Decisivos (3ª e 4ª descidas)":
+    pbp_filtrado = pbp_filtrado.filter(pl.col("down").is_in([3, 4]))
+
+st.divider()
+
+# 3. CRIAÇÃO DAS ABAS
 aba_qbs, aba_rbs, aba_wrs, aba_tes = st.tabs([
     "🎯 Quarterbacks (Passe)", 
     "🏃 Running Backs (Corrida)", 
@@ -53,16 +59,11 @@ aba_qbs, aba_rbs, aba_wrs, aba_tes = st.tabs([
 with aba_qbs:
     st.header("Ranking de Quarterbacks")
     
-    min_passes = st.slider(
-        "Mínimo de passes tentados na temporada:", 
-        min_value=50, 
-        max_value=500, 
-        value=200, 
-        step=25
-    )
+    # Reduzimos o mínimo padrão para não zerar os dados na Red Zone/3rd Down
+    min_passes = st.slider("Mínimo de passes tentados:", 10, 300, 50, step=10, key="s_qb")
     
     ranking_qbs = (
-        pbp
+        pbp_filtrado
         .filter(
             (pl.col("play_type") == "pass") & 
             (pl.col("passer_player_name").is_not_null())
@@ -84,7 +85,7 @@ with aba_qbs:
         column_config={
             "passer_player_name": "Jogador",
             "posteam": "Time",
-            "total_passes": "Passes Tentados",
+            "total_passes": "Passes",
             "taxa_sucesso": st.column_config.NumberColumn("Taxa de Sucesso", format="%.2f%%"),
             "epa_medio": st.column_config.NumberColumn("EPA/Jogada", format="%.3f"),
             "total_tds": "TDs",
@@ -98,16 +99,10 @@ with aba_qbs:
 with aba_rbs:
     st.header("Ranking de Running Backs")
     
-    min_corridas = st.slider(
-        "Mínimo de corridas na temporada:", 
-        min_value=20, 
-        max_value=250, 
-        value=100, 
-        step=10
-    )
+    min_corridas = st.slider("Mínimo de corridas:", 10, 200, 30, step=5, key="s_rb")
     
     ranking_rbs = (
-        pbp
+        pbp_filtrado
         .filter(
             (pl.col("play_type") == "run") & 
             (pl.col("rusher_player_name").is_not_null()) &
@@ -144,17 +139,10 @@ with aba_rbs:
 with aba_wrs:
     st.header("Ranking de Wide Receivers")
     
-    min_alvos_wr = st.slider(
-        "Mínimo de alvos (targets) na temporada:", 
-        min_value=20, 
-        max_value=150, 
-        value=100, 
-        step=5,
-        key="slider_wrs"
-    )
+    min_alvos_wr = st.slider("Mínimo de alvos (targets):", 5, 100, 20, step=5, key="s_wr")
     
     ranking_wrs = (
-        pbp
+        pbp_filtrado
         .filter(
             (pl.col("play_type") == "pass") & 
             (pl.col("receiver_player_name").is_not_null()) &
@@ -170,9 +158,7 @@ with aba_wrs:
             pl.col("epa").mean().alias("epa_medio")
         ])
         .filter(pl.col("alvos") >= min_alvos_wr)
-        .with_columns(
-            (pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo")
-        )
+        .with_columns((pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo"))
         .sort(["jardas_por_alvo", "jardas"], descending=[True, True])
     )
     
@@ -197,17 +183,10 @@ with aba_wrs:
 with aba_tes:
     st.header("Ranking de Tight Ends")
     
-    min_alvos_te = st.slider(
-        "Mínimo de alvos (targets) na temporada:", 
-        min_value=10, 
-        max_value=120, 
-        value=40, 
-        step=5,
-        key="slider_tes"
-    )
+    min_alvos_te = st.slider("Mínimo de alvos (targets):", 5, 80, 15, step=5, key="s_te")
     
     ranking_tes = (
-        pbp
+        pbp_filtrado
         .filter(
             (pl.col("play_type") == "pass") & 
             (pl.col("receiver_player_name").is_not_null()) &
@@ -223,9 +202,7 @@ with aba_tes:
             pl.col("epa").mean().alias("epa_medio")
         ])
         .filter(pl.col("alvos") >= min_alvos_te)
-        .with_columns(
-            (pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo")
-        )
+        .with_columns((pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo"))
         .sort(["jardas_por_alvo", "jardas"], descending=[True, True])
     )
     
