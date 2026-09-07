@@ -3,6 +3,7 @@ import nflreadpy as nfl
 import polars as pl
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import GridSearchCV
 
 # 1. Carregar Múltiplos Anos de Dados
 anos = [2022, 2023, 2024, 2025]
@@ -64,21 +65,48 @@ y_test = df_teste["target"]
 print(f"   - Treino (2022-2024): {len(X_train):,} jogadas".replace(",", "."))
 print(f"   - Teste (2025): {len(X_test):,} jogadas".replace(",", "."))
 
-# 4. Treinamento
-print("3. Treinando o modelo...")
-modelo = RandomForestClassifier(
-    n_estimators=150, max_depth=12, random_state=42, n_jobs=-1
-)
-modelo.fit(X_train, y_train)
+# 4. Definição do Grid de Hiperparâmetros
+param_grid = {
+    "n_estimators": [100, 150, 200],
+    "max_depth": [8, 10, 12, 15],
+    "min_samples_split": [5, 10],
+    "min_samples_leaf": [2, 5],
+}
 
-# 5. Avaliação
-previsoes = modelo.predict(X_test)
+print("\n3. Iniciando o GridSearchCV (isso pode levar de 1 a 3 minutos)...")
+rf_base = RandomForestClassifier(random_state=42, n_jobs=-1)
+
+# cv=3 realiza Validação Cruzada de 3 dobras (folds)
+grid_search = GridSearchCV(
+    estimator=rf_base,
+    param_grid=param_grid,
+    cv=3,
+    scoring="accuracy",
+    verbose=1,
+    n_jobs=-1,
+)
+
+grid_search.fit(X_train, y_train)
+
+# 5. Extração do Melhor Modelo Encontrado
+melhor_modelo = grid_search.best_estimator_
+
+print("\n🏆 Melhores Hiperparâmetros Encontrados:")
+for param, valor in grid_search.best_params_.items():
+    print(f"   - {param}: {valor}")
+
+# 6. Avaliação com os dados de Teste (Temporada 2025)
+previsoes = melhor_modelo.predict(X_test)
 acuracia = accuracy_score(y_test, previsoes)
 
-print(f"\n✅ Modelo treinado com sucesso!")
-print(f"🎯 Nova Acurácia (Testado na temporada 2025): {acuracia * 100:.2f}%\n")
-print(classification_report(y_test, previsoes, target_names=["Corrida (0)", "Passe (1)"]))
+print(f"\n✅ Avaliação com o Melhor Modelo!")
+print(f"🎯 Acurácia na Temporada 2025: {acuracia * 100:.2f}%\n")
+print(
+    classification_report(
+        y_test, previsoes, target_names=["Corrida (0)", "Passe (1)"]
+    )
+)
 
-# 6. Salvar Modelo
-joblib.dump(modelo, "modelo_pass_run.joblib")
-print("💾 Modelo salvo como 'modelo_pass_run.joblib'")
+# 7. Salvar o Melhor Modelo
+joblib.dump(melhor_modelo, "modelo_pass_run.joblib")
+print("💾 Melhor modelo salvo como 'modelo_pass_run.joblib'")

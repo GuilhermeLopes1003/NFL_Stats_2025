@@ -326,59 +326,101 @@ with aba_tes:
 with aba_ml:
     st.header("🧠 Preditor de Chamada de Jogada (Random Forest)")
     st.write(
-        "Ajuste as condições da partida abaixo para simular a decisão da comissão técnica:"
+        "Configure o cenário da partida abaixo para simular a decisão do Head Coach:"
     )
 
     if modelo is None:
         st.error(
-            "⚠️ O arquivo `modelo_pass_run.joblib` não foi encontrado. Execute `python treinar_modelo.py` no terminal antes de usar o simulador."
+            "⚠️ O arquivo `modelo_pass_run.joblib` não foi encontrado. Execute `python treinar_modelo.py` no terminal."
         )
     else:
         col_m1, col_m2 = st.columns(2)
 
         with col_m1:
-            down = st.number_input(
-                "Descida (Down):", min_value=1, max_value=4, value=1, step=1
+            st.subheader("📌 Situação de Campo & Descida")
+
+            down = st.radio(
+                "Descida (Down):", [1, 2, 3, 4], horizontal=True, index=0
             )
-            ydstogo = st.number_input(
-                "Jardas para o First Down:",
+
+            ydstogo = st.slider(
+                "Jardas para o First Down (Yards To Go):",
                 min_value=1,
-                max_value=30,
+                max_value=25,
                 value=10,
                 step=1,
             )
-            yardline_100 = st.slider(
-                "Distância para a Endzone Adversária:",
-                min_value=1,
-                max_value=99,
-                value=75,
-                help="10 = Red Zone | 50 = Meio de campo | 80 = Linha de 20 própria",
+
+            lado_campo = st.radio(
+                "Lado do Campo:",
+                ["Próprio Campo", "Campo Adversário"],
+                horizontal=True,
             )
+
+            linha_jarda = st.slider(
+                "Linha da Jarda (1 a 50):",
+                min_value=1,
+                max_value=50,
+                value=25,
+                help="Exemplo: Linha de 20 no campo adversário é a Red Zone!",
+            )
+
+            # Cálculo de conversão da posição no campo (yardline_100)
+            if lado_campo == "Campo Adversário":
+                yardline_100 = linha_jarda
+            else:
+                yardline_100 = 100 - linha_jarda
 
         with col_m2:
-            minutos = st.number_input(
-                "Minutos restantes no Half:",
-                min_value=0,
-                max_value=30,
-                value=15,
-            )
-            segundos = st.number_input(
-                "Segundos restantes no minuto:",
-                min_value=0,
-                max_value=59,
-                value=0,
-            )
-            score_differential = st.number_input(
-                "Diferença de Pontos (Time com a posse):",
-                min_value=-50,
-                max_value=50,
-                value=0,
-                help="Positivo = Vencendo | Negativo = Perdendo",
+            st.subheader("⏱️ Tempo & Placar")
+
+            quarto = st.selectbox(
+                "Quarto do Jogo (Quarter):",
+                [
+                    "1º Quarto (Q1)",
+                    "2º Quarto (Q2)",
+                    "3º Quarto (Q3)",
+                    "4º Quarto (Q4)",
+                ],
+                index=0,
             )
 
-        half_seconds_remaining = (minutos * 60) + segundos
+            minutos_quarto = st.slider(
+                "Minutos restantes no Quarto:",
+                min_value=0,
+                max_value=15,
+                value=10,
+                step=1,
+            )
 
-        # Entrada para o modelo
+            # Cálculo automático dos segundos restantes na metade do jogo (Half)
+            # Q1 e Q3 dependem dos 15 min do quarto seguinte no mesmo Half
+            if "1º" in quarto or "3º" in quarto:
+                half_seconds_remaining = (minutos_quarto * 60) + (15 * 60)
+            else:
+                half_seconds_remaining = minutos_quarto * 60
+
+            situacao_placar = st.radio(
+                "Situação do Time com a Posse:",
+                ["Empatado", "Vencendo", "Perdendo"],
+                horizontal=True,
+            )
+
+            if situacao_placar == "Empatado":
+                score_differential = 0
+            else:
+                dif_pontos = st.number_input(
+                    f"Diferença de Pontos ({situacao_placar}):",
+                    min_value=1,
+                    max_value=35,
+                    value=3,
+                    step=1,
+                )
+                score_differential = (
+                    dif_pontos if situacao_placar == "Vencendo" else -dif_pontos
+                )
+
+        # Entrada tratada para o modelo
         dados_simulacao = pd.DataFrame(
             [
                 {
@@ -396,7 +438,7 @@ with aba_ml:
         prob_passe = probabilidades[1] * 100
 
         st.divider()
-        st.subheader("📊 Resultado da Previsão")
+        st.subheader("📊 Previsão da Chamada de Jogada")
 
         col_p1, col_p2 = st.columns(2)
         with col_p1:
@@ -414,9 +456,9 @@ with aba_ml:
 
         if prob_passe > prob_corrida:
             st.info(
-                f"💡 **Predição Final:** Tendência clara de **PASSE** ({prob_passe:.1f}% vs {prob_corrida:.1f}%)."
+                f"💡 **Tendência do Modelo:** Maior chance de **PASSE** ({prob_passe:.1f}% vs {prob_corrida:.1f}%)."
             )
         else:
             st.info(
-                f"💡 **Predição Final:** Tendência clara de **CORRIDA** ({prob_corrida:.1f}% vs {prob_passe:.1f}%)."
+                f"💡 **Tendência do Modelo:** Maior chance de **CORRIDA** ({prob_corrida:.1f}% vs {prob_passe:.1f}%)."
             )
