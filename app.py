@@ -1,427 +1,177 @@
 import joblib
 import nflreadpy as nfl
+import numpy as np
 import pandas as pd
 import polars as pl
 import streamlit as st
 
-st.set_page_config(page_title="NFL Analytics Dashboard", layout="wide")
-
-st.title("🏈 Dashboard de Performance da NFL (2025)")
-
-
-# 1. Carregamento dos dados e modelo
-@st.cache_data
-def carregar_dados():
-    pbp = nfl.load_pbp([2025])
-    rosters = nfl.load_rosters([2025])
-
-    ids_rbs = (
-        rosters.filter(pl.col("position") == "RB")
-        .select("gsis_id")
-        .to_series()
-        .to_list()
-    )
-    ids_wrs = (
-        rosters.filter(pl.col("position") == "WR")
-        .select("gsis_id")
-        .to_series()
-        .to_list()
-    )
-    ids_tes = (
-        rosters.filter(pl.col("position") == "TE")
-        .select("gsis_id")
-        .to_series()
-        .to_list()
-    )
-
-    return pbp, ids_rbs, ids_wrs, ids_tes
-
-
-@st.cache_resource
-def carregar_modelo():
-    try:
-        return joblib.load("modelo_pass_run.joblib")
-    except Exception:
-        return None
-
-
-pbp, ids_rbs, ids_wrs, ids_tes = carregar_dados()
-modelo = carregar_modelo()
-
-# 2. SEÇÃO DE FILTROS SITUACIONAIS (Topo do App)
-st.subheader("⚙️ Contexto do Game Script")
-col_f1, col_f2 = st.columns(2)
-
-with col_f1:
-    filtro_zona = st.selectbox(
-        "Zona do Campo:", ["Campo Inteiro", "Red Zone (Últimas 20 jardas)"]
-    )
-
-with col_f2:
-    filtro_descida = st.selectbox(
-        "Situação de Descida (Down):",
-        ["Todas as Descidas", "Momentos Decisivos (3ª e 4ª descidas)"],
-    )
-
-# Aplicação dos filtros no DataFrame PBP
-pbp_filtrado = pbp
-
-if filtro_zona == "Red Zone (Últimas 20 jardas)":
-    pbp_filtrado = pbp_filtrado.filter(pl.col("yardline_100") <= 20)
-
-if filtro_descida == "Momentos Decisivos (3ª e 4ª descidas)":
-    pbp_filtrado = pbp_filtrado.filter(pl.col("down").is_in([3, 4]))
-
-st.divider()
-
-# 3. CRIAÇÃO DAS ABAS
-aba_qbs, aba_rbs, aba_wrs, aba_tes, aba_ml = st.tabs(
-    [
-        "🎯 Quarterbacks (Passe)",
-        "🏃 Running Backs (Corrida)",
-        "🙌 Wide Receivers (Recepção)",
-        "🏈 Tight Ends (Recepção)",
-        "🤖 Simulador ML (Passe vs Corrida)",
-    ]
+# Configuração da Página
+st.set_page_config(
+    page_title="NFL Analytics & Play-Call Predictor",
+    page_icon="🏈",
+    layout="wide",
 )
 
-# --- ABA 1: QUARTERBACKS ---
-with aba_qbs:
-    st.header("Ranking de Quarterbacks")
 
-    min_passes = st.slider(
-        "Mínimo de passes tentados:", 10, 300, 50, step=10, key="s_qb"
+# ==========================================
+# 1. FUNÇÕES DE CARREGAMENTO DE DADOS E MODELO
+# ==========================================
+@st.cache_resource
+def carregar_modelo():
+    return joblib.load("modelo_pass_run.joblib")
+
+
+@st.cache_data
+def carregar_dados_pbp():
+    # Carrega PBP recente para rankings e estatísticas dos times
+    pbp = nfl.load_pbp([2024, 2025])
+    return pbp.filter(
+        (pl.col("play_type").is_in(["pass", "run"]))
+        & (pl.col("posteam").is_not_null())
+        & (pl.col("defteam").is_not_null())
+        & (pl.col("epa").is_not_null())
     )
 
-    ranking_qbs = (
-        pbp_filtrado.filter(
-            (pl.col("play_type") == "pass")
-            & (pl.col("passer_player_name").is_not_null())
+
+@st.cache_data
+def processar_stats_times(pbp_valid):
+    # Taxa de Passe do Ataque
+    offense = pbp_valid.group_by("posteam").agg(
+        [
+            (
+                pl.col("play_type").filter(pl.col("play_type") == "pass").count()
+                / pl.col("play_type").count()
+            ).alias("offense_pass_ratio")
+        ]
+    )
+
+    # Eficiência Defensiva (EPA)
+    defense = pbp_valid.group_by("defteam").agg(
+        [
+            pl.col("epa")
+            .filter(pl.col("play_type") == "pass")
+            .mean()
+            .alias("def_epa_against_pass"),
+            pl.col("epa")
+            .filter(pl.col("play_type") == "run")
+            .mean()
+            .alias("def_epa_against_run"),
+        ]
+    )
+
+    return (
+        offense.to_pandas().set_index("posteam"),
+        defense.to_pandas().set_index("defteam"),
+    )
+
+
+# Inicialização dos Dados
+try:
+    modelo_ml = carregar_modelo()
+    pbp_data = carregar_dados_pbp()
+    df_offense_stats, df_defense_stats = processar_stats_times(pbp_data)
+except Exception as e:
+    st.error(f"Erro ao inicializar a aplicação: {e}")
+    st.stop()
+
+
+# ==========================================
+# 2. CABEÇALHO E NAVEGAÇÃO POR ABAS
+# ==========================================
+st.title("🏈 NFL Analytics & Play-Call Predictor")
+st.write(
+    "Plataforma unificada para análise de desempenho de atletas e simulação tática preditiva via Machine Learning."
+)
+
+aba_simulador, aba_rankings = st.tabs(
+    ["🎯 Simulador Preditivo (v2.0)", "📊 Rankings de Jogadores"]
+)
+
+
+# ==========================================
+# ABA 1: SIMULADOR PREDITIVO V2
+# ==========================================
+with aba_simulador:
+    st.header("🎯 Simulador de Chamada de Jogadas (XGBoost v2)")
+    st.caption(
+        "Acurácia de 72.61% no teste de 2025 com variáveis situacionais e formações pré-snap."
+    )
+
+    col_sit, col_tact, col_teams = st.columns([1, 1, 1])
+
+    with col_sit:
+        st.subheader("📍 Situação de Campo")
+        down = st.selectbox("Descida (Down)", options=[1, 2, 3, 4], index=0)
+        ydstogo = st.number_input(
+            "Jardas para o First Down", min_value=1, max_value=99, value=10
         )
-        .group_by(["passer_player_name", "posteam"])
-        .agg(
-            [
-                pl.len().alias("total_passes"),
-                (pl.col("epa").gt(0).mean() * 100).alias("taxa_sucesso"),
-                pl.col("epa").mean().alias("epa_medio"),
-                pl.col("pass_touchdown")
-                .sum()
-                .cast(pl.UInt32)
-                .alias("total_tds"),
-                pl.col("yards_gained")
-                .sum()
-                .cast(pl.Int64)
-                .alias("total_jardas"),
-            ]
+        yardline_100 = st.slider(
+            "Distância para a End Zone (Yardline 100)", 1, 99, 75
         )
-        .filter(pl.col("total_passes") >= min_passes)
-        .sort(["epa_medio", "taxa_sucesso"], descending=[True, True])
-    )
-
-    st.dataframe(
-        ranking_qbs,
-        column_config={
-            "passer_player_name": "Jogador",
-            "posteam": "Time",
-            "total_passes": "Passes",
-            "taxa_sucesso": st.column_config.NumberColumn(
-                "Taxa de Sucesso", format="%.2f%%"
-            ),
-            "epa_medio": st.column_config.NumberColumn(
-                "EPA/Jogada", format="%.3f"
-            ),
-            "total_tds": "TDs",
-            "total_jardas": "Jardas Totais",
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
-
-# --- ABA 2: RUNNING BACKS ---
-with aba_rbs:
-    st.header("Ranking de Running Backs")
-
-    min_corridas = st.slider(
-        "Mínimo de corridas:", 10, 200, 30, step=5, key="s_rb"
-    )
-
-    ranking_rbs = (
-        pbp_filtrado.filter(
-            (pl.col("play_type") == "run")
-            & (pl.col("rusher_player_name").is_not_null())
-            & (pl.col("rusher_player_id").is_in(ids_rbs))
+        tempo_minutos = st.number_input(
+            "Minutos Restantes no Tempo", min_value=0, max_value=15, value=15
         )
-        .group_by(["rusher_player_name", "posteam"])
-        .agg(
-            [
-                pl.len().alias("total_corridas"),
-                (pl.col("epa").gt(0).mean() * 100).alias("taxa_sucesso"),
-                pl.col("epa").mean().alias("epa_medio"),
-                pl.col("rush_touchdown")
-                .sum()
-                .cast(pl.UInt32)
-                .alias("total_tds"),
-                pl.col("yards_gained")
-                .sum()
-                .cast(pl.Int64)
-                .alias("total_jardas"),
-            ]
+        tempo_segundos = st.number_input(
+            "Segundos Restantes no Minuto", min_value=0, max_value=59, value=0
         )
-        .filter(pl.col("total_corridas") >= min_corridas)
-        .sort(["taxa_sucesso", "total_jardas"], descending=[True, True])
-    )
-
-    st.dataframe(
-        ranking_rbs,
-        column_config={
-            "rusher_player_name": "Jogador",
-            "posteam": "Time",
-            "total_corridas": "Corridas",
-            "taxa_sucesso": st.column_config.NumberColumn(
-                "Taxa de Sucesso", format="%.2f%%"
-            ),
-            "epa_medio": st.column_config.NumberColumn(
-                "EPA/Jogada", format="%.3f"
-            ),
-            "total_tds": "TDs",
-            "total_jardas": "Jardas Totais",
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
-
-# --- ABA 3: WIDE RECEIVERS ---
-with aba_wrs:
-    st.header("Ranking de Wide Receivers")
-
-    min_alvos_wr = st.slider(
-        "Mínimo de alvos (targets):", 5, 100, 20, step=5, key="s_wr"
-    )
-
-    ranking_wrs = (
-        pbp_filtrado.filter(
-            (pl.col("play_type") == "pass")
-            & (pl.col("receiver_player_name").is_not_null())
-            & (pl.col("receiver_player_id").is_in(ids_wrs))
+        half_seconds_remaining = (tempo_minutos * 60) + tempo_segundos
+        score_differential = st.number_input(
+            "Diferença no Placar (Ataque - Defesa)",
+            min_value=-50,
+            max_value=50,
+            value=0,
         )
-        .group_by(["receiver_player_name", "posteam"])
-        .agg(
-            [
-                pl.len().alias("alvos"),
-                pl.col("complete_pass")
-                .sum()
-                .cast(pl.UInt32)
-                .alias("recepcoes"),
-                (pl.col("complete_pass").mean() * 100).alias("taxa_captura"),
-                pl.col("yards_gained")
-                .filter(pl.col("complete_pass") == 1)
-                .sum()
-                .cast(pl.Int64)
-                .alias("jardas"),
-                pl.col("pass_touchdown")
-                .filter(pl.col("complete_pass") == 1)
-                .sum()
-                .cast(pl.UInt32)
-                .alias("tds"),
-                pl.col("epa").mean().alias("epa_medio"),
-            ]
+
+    with col_tact:
+        st.subheader("🛡️ Formação & Ritmo")
+        formacao = st.radio(
+            "Alinhamento do Quarterback",
+            options=["Shotgun", "Under Center"],
+            index=0,
         )
-        .filter(pl.col("alvos") >= min_alvos_wr)
-        .with_columns(
-            (pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo")
+        shotgun = 1 if formacao == "Shotgun" else 0
+
+        no_huddle_input = st.selectbox(
+            "Ataque Rápido (No Huddle)?", options=["Não", "Sim"], index=0
         )
-        .sort(["jardas_por_alvo", "jardas"], descending=[True, True])
-    )
+        no_huddle = 1 if no_huddle_input == "Sim" else 0
 
-    st.dataframe(
-        ranking_wrs,
-        column_config={
-            "receiver_player_name": "Jogador",
-            "posteam": "Time",
-            "alvos": "Alvos",
-            "recepcoes": "Recepções",
-            "taxa_captura": st.column_config.NumberColumn(
-                "Catch %", format="%.2f%%"
-            ),
-            "jardas": "Jardas Totais",
-            "tds": "TDs",
-            "epa_medio": st.column_config.NumberColumn(
-                "EPA/Alvo", format="%.3f"
-            ),
-            "jardas_por_alvo": st.column_config.NumberColumn(
-                "YDS/Target", format="%.2f"
-            ),
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
+    with col_teams:
+        st.subheader("📊 Seleção dos Times")
+        lista_times = sorted(df_offense_stats.index.unique().tolist())
 
-# --- ABA 4: TIGHT ENDS ---
-with aba_tes:
-    st.header("Ranking de Tight Ends")
-
-    min_alvos_te = st.slider(
-        "Mínimo de alvos (targets):", 5, 80, 15, step=5, key="s_te"
-    )
-
-    ranking_tes = (
-        pbp_filtrado.filter(
-            (pl.col("play_type") == "pass")
-            & (pl.col("receiver_player_name").is_not_null())
-            & (pl.col("receiver_player_id").is_in(ids_tes))
+        time_ataque = st.selectbox(
+            "Time no Ataque (Offense)", options=lista_times, index=0
         )
-        .group_by(["receiver_player_name", "posteam"])
-        .agg(
-            [
-                pl.len().alias("alvos"),
-                pl.col("complete_pass")
-                .sum()
-                .cast(pl.UInt32)
-                .alias("recepcoes"),
-                (pl.col("complete_pass").mean() * 100).alias("taxa_captura"),
-                pl.col("yards_gained")
-                .filter(pl.col("complete_pass") == 1)
-                .sum()
-                .cast(pl.Int64)
-                .alias("jardas"),
-                pl.col("pass_touchdown")
-                .filter(pl.col("complete_pass") == 1)
-                .sum()
-                .cast(pl.UInt32)
-                .alias("tds"),
-                pl.col("epa").mean().alias("epa_medio"),
-            ]
+        time_defesa = st.selectbox(
+            "Time na Defesa (Defense)",
+            options=lista_times,
+            index=1 if len(lista_times) > 1 else 0,
         )
-        .filter(pl.col("alvos") >= min_alvos_te)
-        .with_columns(
-            (pl.col("jardas") / pl.col("alvos")).alias("jardas_por_alvo")
+
+        offense_pass_ratio = float(
+            df_offense_stats.loc[time_ataque, "offense_pass_ratio"]
         )
-        .sort(["jardas_por_alvo", "jardas"], descending=[True, True])
-    )
-
-    st.dataframe(
-        ranking_tes,
-        column_config={
-            "receiver_player_name": "Jogador",
-            "posteam": "Time",
-            "alvos": "Alvos",
-            "recepcoes": "Recepções",
-            "taxa_captura": st.column_config.NumberColumn(
-                "Catch %", format="%.2f%%"
-            ),
-            "jardas": "Jardas Totais",
-            "tds": "TDs",
-            "epa_medio": st.column_config.NumberColumn(
-                "EPA/Alvo", format="%.3f"
-            ),
-            "jardas_por_alvo": st.column_config.NumberColumn(
-                "YDS/Target", format="%.2f"
-            ),
-        },
-        use_container_width=True,
-        hide_index=True,
-    )
-
-# --- ABA 5: SIMULADOR ML ---
-with aba_ml:
-    st.header("🧠 Preditor de Chamada de Jogada (Random Forest)")
-    st.write(
-        "Configure o cenário da partida abaixo para simular a decisão do Head Coach:"
-    )
-
-    if modelo is None:
-        st.error(
-            "⚠️ O arquivo `modelo_pass_run.joblib` não foi encontrado. Execute `python treinar_modelo.py` no terminal."
+        def_epa_against_pass = float(
+            df_defense_stats.loc[time_defesa, "def_epa_against_pass"]
         )
-    else:
-        col_m1, col_m2 = st.columns(2)
+        def_epa_against_run = float(
+            df_defense_stats.loc[time_defesa, "def_epa_against_run"]
+        )
 
-        with col_m1:
-            st.subheader("📌 Situação de Campo & Descida")
+        st.info(
+            f"**Métricas Carregadas:**\n"
+            f"- Pass Ratio ({time_ataque}): `{offense_pass_ratio * 100:.1f}%`\n"
+            f"- Def EPA/Passe ({time_defesa}): `{def_epa_against_pass:.3f}`\n"
+            f"- Def EPA/Corrida ({time_defesa}): `{def_epa_against_run:.3f}`"
+        )
 
-            down = st.radio(
-                "Descida (Down):", [1, 2, 3, 4], horizontal=True, index=0
-            )
+    st.markdown("---")
 
-            ydstogo = st.slider(
-                "Jardas para o First Down (Yards To Go):",
-                min_value=1,
-                max_value=25,
-                value=10,
-                step=1,
-            )
-
-            lado_campo = st.radio(
-                "Lado do Campo:",
-                ["Próprio Campo", "Campo Adversário"],
-                horizontal=True,
-            )
-
-            linha_jarda = st.slider(
-                "Linha da Jarda (1 a 50):",
-                min_value=1,
-                max_value=50,
-                value=25,
-                help="Exemplo: Linha de 20 no campo adversário é a Red Zone!",
-            )
-
-            # Cálculo de conversão da posição no campo (yardline_100)
-            if lado_campo == "Campo Adversário":
-                yardline_100 = linha_jarda
-            else:
-                yardline_100 = 100 - linha_jarda
-
-        with col_m2:
-            st.subheader("⏱️ Tempo & Placar")
-
-            quarto = st.selectbox(
-                "Quarto do Jogo (Quarter):",
-                [
-                    "1º Quarto (Q1)",
-                    "2º Quarto (Q2)",
-                    "3º Quarto (Q3)",
-                    "4º Quarto (Q4)",
-                ],
-                index=0,
-            )
-
-            minutos_quarto = st.slider(
-                "Minutos restantes no Quarto:",
-                min_value=0,
-                max_value=15,
-                value=10,
-                step=1,
-            )
-
-            # Cálculo automático dos segundos restantes na metade do jogo (Half)
-            # Q1 e Q3 dependem dos 15 min do quarto seguinte no mesmo Half
-            if "1º" in quarto or "3º" in quarto:
-                half_seconds_remaining = (minutos_quarto * 60) + (15 * 60)
-            else:
-                half_seconds_remaining = minutos_quarto * 60
-
-            situacao_placar = st.radio(
-                "Situação do Time com a Posse:",
-                ["Empatado", "Vencendo", "Perdendo"],
-                horizontal=True,
-            )
-
-            if situacao_placar == "Empatado":
-                score_differential = 0
-            else:
-                dif_pontos = st.number_input(
-                    f"Diferença de Pontos ({situacao_placar}):",
-                    min_value=1,
-                    max_value=35,
-                    value=3,
-                    step=1,
-                )
-                score_differential = (
-                    dif_pontos if situacao_placar == "Vencendo" else -dif_pontos
-                )
-
-        # Entrada tratada para o modelo
-        dados_simulacao = pd.DataFrame(
+    if st.button(
+        "🚀 Simular Chamada de Jogada", type="primary", use_container_width=True
+    ):
+        novos_dados = pd.DataFrame(
             [
                 {
                     "down": down,
@@ -429,36 +179,242 @@ with aba_ml:
                     "yardline_100": yardline_100,
                     "half_seconds_remaining": half_seconds_remaining,
                     "score_differential": score_differential,
+                    "shotgun": shotgun,
+                    "no_huddle": no_huddle,
+                    "offense_pass_ratio": offense_pass_ratio,
+                    "def_epa_against_pass": def_epa_against_pass,
+                    "def_epa_against_run": def_epa_against_run,
                 }
             ]
         )
 
-        probabilidades = modelo.predict_proba(dados_simulacao)[0]
-        prob_corrida = probabilidades[0] * 100
-        prob_passe = probabilidades[1] * 100
+        probabilidades = modelo_ml.predict_proba(novos_dados)[0]
+        prob_corrida = float(probabilidades[0] * 100)
+        prob_passe = float(probabilidades[1] * 100)
 
-        st.divider()
-        st.subheader("📊 Previsão da Chamada de Jogada")
+        st.subheader("🎯 Resultado do Simulador")
+        res_col1, res_col2 = st.columns(2)
 
-        col_p1, col_p2 = st.columns(2)
-        with col_p1:
+        with res_col1:
             st.metric(
-                label="Probabilidade de CORRIDA 🏃",
-                value=f"{prob_corrida:.1f}%",
+                label="Probabilidade de PASSE", value=f"{prob_passe:.1f}%"
             )
-            st.progress(prob_corrida / 100)
+            st.progress(prob_passe / 100.0)
 
-        with col_p2:
+        with res_col2:
             st.metric(
-                label="Probabilidade de PASSE 🏈", value=f"{prob_passe:.1f}%"
+                label="Probabilidade de CORRIDA", value=f"{prob_corrida:.1f}%"
             )
-            st.progress(prob_passe / 100)
+            st.progress(prob_corrida / 100.0)
 
         if prob_passe > prob_corrida:
-            st.info(
-                f"💡 **Tendência do Modelo:** Maior chance de **PASSE** ({prob_passe:.1f}% vs {prob_corrida:.1f}%)."
+            st.success(
+                f"💡 **Predição Final: PASSE** (Confiança: {prob_passe:.1f}%)"
             )
         else:
             st.info(
-                f"💡 **Tendência do Modelo:** Maior chance de **CORRIDA** ({prob_corrida:.1f}% vs {prob_passe:.1f}%)."
+                f"💡 **Predição Final: CORRIDA** (Confiança: {prob_corrida:.1f}%)"
             )
+
+
+# ==========================================
+# ABA 2: RANKINGS DE JOGADORES (REQUISITOS REAIS)
+# ==========================================
+with aba_rankings:
+    st.header("📊 Rankings Dinâmicos de Jogadores")
+
+    col_pos, col_filtro = st.columns([1, 1])
+
+    with col_pos:
+        posicao = st.selectbox(
+            "Selecione a Posição para Análise:",
+            options=[
+                "Quarterbacks (QB)",
+                "Running Backs (RB)",
+                "Wide Receivers (WR)",
+                "Tight Ends (TE)",
+            ],
+        )
+
+    # 1. QUARTERBACKS: EPA/Jogada & Taxa de Sucesso (%)
+    if "Quarterbacks" in posicao:
+        with col_filtro:
+            min_tentativas = st.slider(
+                "Mínimo de Passes Tentados:",
+                min_value=10,
+                max_value=1200,
+                value=250,
+                step=10,
+            )
+
+        st.subheader(
+            f"🏆 Ranking de QBs (Mínimo de {min_tentativas} tentativas)"
+        )
+
+        qb_stats = (
+            pbp_data.filter(
+                (pl.col("play_type") == "pass")
+                & (pl.col("passer_player_name").is_not_null())
+            )
+            .group_by("passer_player_name")
+            .agg(
+                [
+                    pl.col("play_id").count().alias("tentativas"),
+                    pl.col("epa").mean().alias("epa_por_jogada"),
+                    (
+                        pl.col("epa").filter(pl.col("epa") > 0).count()
+                        / pl.col("play_id").count()
+                    ).alias("taxa_sucesso"),
+                ]
+            )
+            .filter(pl.col("tentativas") >= min_tentativas)
+            .sort("epa_por_jogada", descending=True)
+        )
+
+        df_qb_display = qb_stats.to_pandas()
+        df_qb_display["taxa_sucesso"] = df_qb_display["taxa_sucesso"] * 100
+        st.dataframe(
+            df_qb_display.style.format(
+                {"epa_por_jogada": "{:.3f}", "taxa_sucesso": "{:.1f}%"}
+            ),
+            use_container_width=True,
+        )
+
+    # 2. RUNNING BACKS: Taxa de Sucesso (%) & Jardas Totais
+    elif "Running Backs" in posicao:
+        with col_filtro:
+            min_carregadas = st.slider(
+                "Mínimo de Corridas (Carregadas):",
+                min_value=10,
+                max_value=600,
+                value=100,
+                step=10,
+            )
+
+        st.subheader(
+            f"🏆 Ranking de RBs (Mínimo de {min_carregadas} carregadas)"
+        )
+
+        rb_stats = (
+            pbp_data.filter(
+                (pl.col("play_type") == "run")
+                & (pl.col("rusher_player_name").is_not_null())
+            )
+            .group_by("rusher_player_name")
+            .agg(
+                [
+                    pl.col("play_id").count().alias("carregadas"),
+                    pl.col("yards_gained").sum().alias("jardas_totais"),
+                    pl.col("yards_gained").mean().alias("media_jardas"),
+                    (
+                        pl.col("epa").filter(pl.col("epa") > 0).count()
+                        / pl.col("play_id").count()
+                    ).alias("taxa_sucesso"),
+                    pl.col("epa").mean().alias("epa_por_corrida"),
+                ]
+            )
+            .filter(pl.col("carregadas") >= min_carregadas)
+            .sort("jardas_totais", descending=True)
+        )
+
+        df_rb_display = rb_stats.to_pandas()
+        df_rb_display["taxa_sucesso"] = df_rb_display["taxa_sucesso"] * 100
+        st.dataframe(
+            df_rb_display.style.format(
+                {
+                    "media_jardas": "{:.2f}",
+                    "taxa_sucesso": "{:.1f}%",
+                    "epa_por_corrida": "{:.3f}",
+                }
+            ),
+            use_container_width=True,
+        )
+
+    # 3. WIDE RECEIVERS: Jardas por Alvo (YDS/Target) & Catch %
+    elif "Wide Receivers" in posicao:
+        with col_filtro:
+            min_alvos = st.slider(
+                "Mínimo de Alvos (Targets):",
+                min_value=10,
+                max_value=400,
+                value=60,
+                step=10,
+            )
+
+        st.subheader(f"🏆 Ranking de Wide Receivers (Mínimo de {min_alvos} alvos)")
+
+        wr_stats = (
+            pbp_data.filter(
+                (pl.col("play_type") == "pass")
+                & (pl.col("receiver_player_name").is_not_null())
+            )
+            .group_by("receiver_player_name")
+            .agg(
+                [
+                    pl.col("play_id").count().alias("alvos"),
+                    pl.col("complete_pass").sum().alias("recepcoes"),
+                    pl.col("yards_gained").sum().alias("jardas_recebidas"),
+                    (
+                        pl.col("yards_gained").sum() / pl.col("play_id").count()
+                    ).alias("jardas_por_alvo"),
+                    (
+                        pl.col("complete_pass").sum() / pl.col("play_id").count()
+                    ).alias("catch_percentage"),
+                ]
+            )
+            .filter(pl.col("alvos") >= min_alvos)
+            .sort("jardas_recebidas", descending=True)
+        )
+
+        df_wr_display = wr_stats.to_pandas()
+        df_wr_display["catch_percentage"] = df_wr_display["catch_percentage"] * 100
+        st.dataframe(
+            df_wr_display.style.format(
+                {
+                    "jardas_por_alvo": "{:.2f}",
+                    "catch_percentage": "{:.1f}%",
+                }
+            ),
+            use_container_width=True,
+        )
+
+    # 4. TIGHT ENDS: Jardas por Alvo (YDS/Target) & EPA/Alvo
+    elif "Tight Ends" in posicao:
+        with col_filtro:
+            min_alvos = st.slider(
+                "Mínimo de Alvos (Targets):",
+                min_value=10,
+                max_value=300,
+                value=40,
+                step=10,
+            )
+
+        st.subheader(f"🏆 Ranking de Tight Ends (Mínimo de {min_alvos} alvos)")
+
+        te_stats = (
+            pbp_data.filter(
+                (pl.col("play_type") == "pass")
+                & (pl.col("receiver_player_name").is_not_null())
+            )
+            .group_by("receiver_player_name")
+            .agg(
+                [
+                    pl.col("play_id").count().alias("alvos"),
+                    pl.col("complete_pass").sum().alias("recepcoes"),
+                    pl.col("yards_gained").sum().alias("jardas_recebidas"),
+                    (
+                        pl.col("yards_gained").sum() / pl.col("play_id").count()
+                    ).alias("jardas_por_alvo"),
+                    pl.col("epa").mean().alias("epa_por_alvo"),
+                ]
+            )
+            .filter(pl.col("alvos") >= min_alvos)
+            .sort("epa_por_alvo", descending=True)
+        )
+
+        st.dataframe(
+            te_stats.to_pandas().style.format(
+                {"jardas_por_alvo": "{:.2f}", "epa_por_alvo": "{:.3f}"}
+            ),
+            use_container_width=True,
+        )
