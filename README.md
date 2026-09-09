@@ -101,10 +101,6 @@ pip install streamlit polars nflreadpy scikit-learn xgboost joblib pandas
 ```sh
 python treinar_modelo.py
 ```
-### 3.Iniciar o Dashboard no Streamlit:
+### 3.Iniciar o Dashboard no Streamlit com o Simulador Tático (v2.0) e os Rankings:
 ```sh
 streamlit run app.py
-```
-### Para acessar a nova Interface do Simulador Tático (v2.0):
-```sh
-stramlit run app_v2.py
