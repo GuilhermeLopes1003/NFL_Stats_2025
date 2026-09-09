@@ -218,7 +218,7 @@ with aba_simulador:
 
 
 # ==========================================
-# ABA 2: RANKINGS DE JOGADORES (REQUISITOS REAIS)
+# ABA 2: RANKINGS DE JOGADORES (COM FORMATAÇÃO LIMPA DE DECIMAIS)
 # ==========================================
 with aba_rankings:
     st.header("📊 Rankings Dinâmicos de Jogadores")
@@ -236,20 +236,12 @@ with aba_rankings:
             ],
         )
 
-    # 1. QUARTERBACKS: EPA/Jogada & Taxa de Sucesso (%)
+    # 1. QUARTERBACKS
     if "Quarterbacks" in posicao:
         with col_filtro:
             min_tentativas = st.slider(
-                "Mínimo de Passes Tentados:",
-                min_value=10,
-                max_value=1200,
-                value=250,
-                step=10,
+                "Mínimo de Passes Tentados:", 10, 1200, 250, 10
             )
-
-        st.subheader(
-            f"🏆 Ranking de QBs (Mínimo de {min_tentativas} tentativas)"
-        )
 
         qb_stats = (
             pbp_data.filter(
@@ -259,6 +251,7 @@ with aba_rankings:
             .group_by("passer_player_name")
             .agg(
                 [
+                    pl.col("posteam").last().alias("time"),
                     pl.col("play_id").count().alias("tentativas"),
                     pl.col("epa").mean().alias("epa_por_jogada"),
                     (
@@ -271,29 +264,44 @@ with aba_rankings:
             .sort("epa_por_jogada", descending=True)
         )
 
-        df_qb_display = qb_stats.to_pandas()
-        df_qb_display["taxa_sucesso"] = df_qb_display["taxa_sucesso"] * 100
+        df_display = qb_stats.to_pandas()
+        df_display["taxa_sucesso"] = df_display["taxa_sucesso"] * 100
+
+        st.subheader(
+            f"🏆 Ranking de QBs (Mínimo de {min_tentativas} tentativas)"
+        )
         st.dataframe(
-            df_qb_display.style.format(
+            df_display.style.format(
                 {"epa_por_jogada": "{:.3f}", "taxa_sucesso": "{:.1f}%"}
             ),
             use_container_width=True,
         )
 
-    # 2. RUNNING BACKS: Taxa de Sucesso (%) & Jardas Totais
+        st.markdown("---")
+        st.subheader("🔍 Detalhes do Atleta")
+        lista_jogadores = df_display["passer_player_name"].tolist()
+        if lista_jogadores:
+            jogador_sel = st.selectbox(
+                "Selecione um QB para ver o time e o resumo:",
+                options=lista_jogadores,
+            )
+            dados_atleta = df_display[
+                df_display["passer_player_name"] == jogador_sel
+            ].iloc[0]
+            st.info(
+                f"👤 **Jogador:** {dados_atleta['passer_player_name']} | "
+                f"🛡️ **Time:** {dados_atleta['time']} | "
+                f"🏈 **Passes:** {dados_atleta['tentativas']} | "
+                f"📈 **EPA/Jogada:** {dados_atleta['epa_por_jogada']:.3f} | "
+                f"🎯 **Sucesso:** {dados_atleta['taxa_sucesso']:.1f}%"
+            )
+
+    # 2. RUNNING BACKS
     elif "Running Backs" in posicao:
         with col_filtro:
             min_carregadas = st.slider(
-                "Mínimo de Corridas (Carregadas):",
-                min_value=10,
-                max_value=600,
-                value=100,
-                step=10,
+                "Mínimo de Corridas (Carregadas):", 10, 600, 100, 10
             )
-
-        st.subheader(
-            f"🏆 Ranking de RBs (Mínimo de {min_carregadas} carregadas)"
-        )
 
         rb_stats = (
             pbp_data.filter(
@@ -303,8 +311,9 @@ with aba_rankings:
             .group_by("rusher_player_name")
             .agg(
                 [
+                    pl.col("posteam").last().alias("time"),
                     pl.col("play_id").count().alias("carregadas"),
-                    pl.col("yards_gained").sum().alias("jardas_totais"),
+                    pl.col("yards_gained").sum().cast(pl.Int64).alias("jardas_totais"),
                     pl.col("yards_gained").mean().alias("media_jardas"),
                     (
                         pl.col("epa").filter(pl.col("epa") > 0).count()
@@ -317,11 +326,16 @@ with aba_rankings:
             .sort("jardas_totais", descending=True)
         )
 
-        df_rb_display = rb_stats.to_pandas()
-        df_rb_display["taxa_sucesso"] = df_rb_display["taxa_sucesso"] * 100
+        df_display = rb_stats.to_pandas()
+        df_display["taxa_sucesso"] = df_display["taxa_sucesso"] * 100
+
+        st.subheader(
+            f"🏆 Ranking de RBs (Mínimo de {min_carregadas} carregadas)"
+        )
         st.dataframe(
-            df_rb_display.style.format(
+            df_display.style.format(
                 {
+                    "jardas_totais": "{:.0f}",
                     "media_jardas": "{:.2f}",
                     "taxa_sucesso": "{:.1f}%",
                     "epa_por_corrida": "{:.3f}",
@@ -330,18 +344,12 @@ with aba_rankings:
             use_container_width=True,
         )
 
-    # 3. WIDE RECEIVERS: Jardas por Alvo (YDS/Target) & Catch %
+    # 3. WIDE RECEIVERS
     elif "Wide Receivers" in posicao:
         with col_filtro:
             min_alvos = st.slider(
-                "Mínimo de Alvos (Targets):",
-                min_value=10,
-                max_value=400,
-                value=60,
-                step=10,
+                "Mínimo de Alvos (Targets):", 10, 400, 60, 10
             )
-
-        st.subheader(f"🏆 Ranking de Wide Receivers (Mínimo de {min_alvos} alvos)")
 
         wr_stats = (
             pbp_data.filter(
@@ -351,9 +359,10 @@ with aba_rankings:
             .group_by("receiver_player_name")
             .agg(
                 [
+                    pl.col("posteam").last().alias("time"),
                     pl.col("play_id").count().alias("alvos"),
-                    pl.col("complete_pass").sum().alias("recepcoes"),
-                    pl.col("yards_gained").sum().alias("jardas_recebidas"),
+                    pl.col("complete_pass").sum().cast(pl.Int64).alias("recepcoes"),
+                    pl.col("yards_gained").sum().cast(pl.Int64).alias("jardas_recebidas"),
                     (
                         pl.col("yards_gained").sum() / pl.col("play_id").count()
                     ).alias("jardas_por_alvo"),
@@ -366,11 +375,15 @@ with aba_rankings:
             .sort("jardas_recebidas", descending=True)
         )
 
-        df_wr_display = wr_stats.to_pandas()
-        df_wr_display["catch_percentage"] = df_wr_display["catch_percentage"] * 100
+        df_display = wr_stats.to_pandas()
+        df_display["catch_percentage"] = df_display["catch_percentage"] * 100
+
+        st.subheader(f"🏆 Ranking de Wide Receivers (Mínimo de {min_alvos} alvos)")
         st.dataframe(
-            df_wr_display.style.format(
+            df_display.style.format(
                 {
+                    "recepcoes": "{:.0f}",
+                    "jardas_recebidas": "{:.0f}",
                     "jardas_por_alvo": "{:.2f}",
                     "catch_percentage": "{:.1f}%",
                 }
@@ -378,18 +391,12 @@ with aba_rankings:
             use_container_width=True,
         )
 
-    # 4. TIGHT ENDS: Jardas por Alvo (YDS/Target) & EPA/Alvo
+    # 4. TIGHT ENDS
     elif "Tight Ends" in posicao:
         with col_filtro:
             min_alvos = st.slider(
-                "Mínimo de Alvos (Targets):",
-                min_value=10,
-                max_value=300,
-                value=40,
-                step=10,
+                "Mínimo de Alvos (Targets):", 10, 300, 40, 10
             )
-
-        st.subheader(f"🏆 Ranking de Tight Ends (Mínimo de {min_alvos} alvos)")
 
         te_stats = (
             pbp_data.filter(
@@ -399,9 +406,10 @@ with aba_rankings:
             .group_by("receiver_player_name")
             .agg(
                 [
+                    pl.col("posteam").last().alias("time"),
                     pl.col("play_id").count().alias("alvos"),
-                    pl.col("complete_pass").sum().alias("recepcoes"),
-                    pl.col("yards_gained").sum().alias("jardas_recebidas"),
+                    pl.col("complete_pass").sum().cast(pl.Int64).alias("recepcoes"),
+                    pl.col("yards_gained").sum().cast(pl.Int64).alias("jardas_recebidas"),
                     (
                         pl.col("yards_gained").sum() / pl.col("play_id").count()
                     ).alias("jardas_por_alvo"),
@@ -412,9 +420,36 @@ with aba_rankings:
             .sort("epa_por_alvo", descending=True)
         )
 
+        df_display = te_stats.to_pandas()
+
+        st.subheader(f"🏆 Ranking de Tight Ends (Mínimo de {min_alvos} alvos)")
         st.dataframe(
-            te_stats.to_pandas().style.format(
-                {"jardas_por_alvo": "{:.2f}", "epa_por_alvo": "{:.3f}"}
+            df_display.style.format(
+                {
+                    "recepcoes": "{:.0f}",
+                    "jardas_recebidas": "{:.0f}",
+                    "jardas_por_alvo": "{:.2f}",
+                    "epa_por_alvo": "{:.3f}",
+                }
             ),
             use_container_width=True,
         )
+
+        st.markdown("---")
+        st.subheader("🔍 Detalhes do Atleta")
+        lista_jogadores = df_display["receiver_player_name"].tolist()
+        if lista_jogadores:
+            jogador_sel = st.selectbox(
+                "Selecione um TE para ver o time e o resumo:",
+                options=lista_jogadores,
+            )
+            dados_atleta = df_display[
+                df_display["receiver_player_name"] == jogador_sel
+            ].iloc[0]
+            st.info(
+                f"👤 **Jogador:** {dados_atleta['receiver_player_name']} | "
+                f"🛡️ **Time:** {dados_atleta['time']} | "
+                f"🎯 **Alvos:** {dados_atleta['alvos']} | "
+                f"📏 **Jardas/Alvo:** {dados_atleta['jardas_por_alvo']:.2f} | "
+                f"📈 **EPA/Alvo:** {dados_atleta['epa_por_alvo']:.3f}"
+            )
