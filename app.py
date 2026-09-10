@@ -2,6 +2,7 @@ import joblib
 import nflreadpy as nfl
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import polars as pl
 import streamlit as st
 
@@ -23,7 +24,6 @@ def carregar_modelo():
 
 @st.cache_data
 def carregar_dados_pbp():
-    # Carrega PBP recente para rankings e estatísticas dos times
     pbp = nfl.load_pbp([2024, 2025])
     return pbp.filter(
         (pl.col("play_type").is_in(["pass", "run"]))
@@ -35,7 +35,6 @@ def carregar_dados_pbp():
 
 @st.cache_data
 def processar_stats_times(pbp_valid):
-    # Taxa de Passe do Ataque
     offense = pbp_valid.group_by("posteam").agg(
         [
             (
@@ -45,7 +44,6 @@ def processar_stats_times(pbp_valid):
         ]
     )
 
-    # Eficiência Defensiva (EPA)
     defense = pbp_valid.group_by("defteam").agg(
         [
             pl.col("epa")
@@ -80,11 +78,15 @@ except Exception as e:
 # ==========================================
 st.title("🏈 NFL Analytics & Play-Call Predictor")
 st.write(
-    "Plataforma unificada para análise de desempenho de atletas e simulação tática preditiva via Machine Learning."
+    "Plataforma unificada para análise de desempenho de atletas, simulação tática e visualizações avançadas."
 )
 
-aba_simulador, aba_rankings = st.tabs(
-    ["🎯 Simulador Preditivo (v2.0)", "📊 Rankings de Jogadores"]
+aba_simulador, aba_rankings, aba_graficos = st.tabs(
+    [
+        "🎯 Simulador Preditivo (v2.0)",
+        "📊 Rankings de Jogadores",
+        "📈 Visualizações & Analytics",
+    ]
 )
 
 
@@ -218,7 +220,7 @@ with aba_simulador:
 
 
 # ==========================================
-# ABA 2: RANKINGS DE JOGADORES (COM FORMATAÇÃO LIMPA DE DECIMAIS)
+# ABA 2: RANKINGS DE JOGADORES
 # ==========================================
 with aba_rankings:
     st.header("📊 Rankings Dinâmicos de Jogadores")
@@ -313,7 +315,10 @@ with aba_rankings:
                 [
                     pl.col("posteam").last().alias("time"),
                     pl.col("play_id").count().alias("carregadas"),
-                    pl.col("yards_gained").sum().cast(pl.Int64).alias("jardas_totais"),
+                    pl.col("yards_gained")
+                    .sum()
+                    .cast(pl.Int64)
+                    .alias("jardas_totais"),
                     pl.col("yards_gained").mean().alias("media_jardas"),
                     (
                         pl.col("epa").filter(pl.col("epa") > 0).count()
@@ -344,6 +349,25 @@ with aba_rankings:
             use_container_width=True,
         )
 
+        st.markdown("---")
+        st.subheader("🔍 Detalhes do Atleta")
+        lista_jogadores = df_display["rusher_player_name"].tolist()
+        if lista_jogadores:
+            jogador_sel = st.selectbox(
+                "Selecione um RB para ver o time e o resumo:",
+                options=lista_jogadores,
+            )
+            dados_atleta = df_display[
+                df_display["rusher_player_name"] == jogador_sel
+            ].iloc[0]
+            st.info(
+                f"👤 **Jogador:** {dados_atleta['rusher_player_name']} | "
+                f"🛡️ **Time:** {dados_atleta['time']} | "
+                f"🏃 **Carregadas:** {dados_atleta['carregadas']} | "
+                f"📏 **Jardas Totais:** {dados_atleta['jardas_totais']} | "
+                f"📈 **EPA/Corrida:** {dados_atleta['epa_por_corrida']:.3f}"
+            )
+
     # 3. WIDE RECEIVERS
     elif "Wide Receivers" in posicao:
         with col_filtro:
@@ -361,8 +385,14 @@ with aba_rankings:
                 [
                     pl.col("posteam").last().alias("time"),
                     pl.col("play_id").count().alias("alvos"),
-                    pl.col("complete_pass").sum().cast(pl.Int64).alias("recepcoes"),
-                    pl.col("yards_gained").sum().cast(pl.Int64).alias("jardas_recebidas"),
+                    pl.col("complete_pass")
+                    .sum()
+                    .cast(pl.Int64)
+                    .alias("recepcoes"),
+                    pl.col("yards_gained")
+                    .sum()
+                    .cast(pl.Int64)
+                    .alias("jardas_recebidas"),
                     (
                         pl.col("yards_gained").sum() / pl.col("play_id").count()
                     ).alias("jardas_por_alvo"),
@@ -391,6 +421,25 @@ with aba_rankings:
             use_container_width=True,
         )
 
+        st.markdown("---")
+        st.subheader("🔍 Detalhes do Atleta")
+        lista_jogadores = df_display["receiver_player_name"].tolist()
+        if lista_jogadores:
+            jogador_sel = st.selectbox(
+                "Selecione um WR para ver o time e o resumo:",
+                options=lista_jogadores,
+            )
+            dados_atleta = df_display[
+                df_display["receiver_player_name"] == jogador_sel
+            ].iloc[0]
+            st.info(
+                f"👤 **Jogador:** {dados_atleta['receiver_player_name']} | "
+                f"🛡️ **Time:** {dados_atleta['time']} | "
+                f"🎯 **Alvos:** {dados_atleta['alvos']} | "
+                f"🙌 **Recepções:** {dados_atleta['recepcoes']} | "
+                f"📊 **Catch %:** {dados_atleta['catch_percentage']:.1f}%"
+            )
+
     # 4. TIGHT ENDS
     elif "Tight Ends" in posicao:
         with col_filtro:
@@ -408,8 +457,14 @@ with aba_rankings:
                 [
                     pl.col("posteam").last().alias("time"),
                     pl.col("play_id").count().alias("alvos"),
-                    pl.col("complete_pass").sum().cast(pl.Int64).alias("recepcoes"),
-                    pl.col("yards_gained").sum().cast(pl.Int64).alias("jardas_recebidas"),
+                    pl.col("complete_pass")
+                    .sum()
+                    .cast(pl.Int64)
+                    .alias("recepcoes"),
+                    pl.col("yards_gained")
+                    .sum()
+                    .cast(pl.Int64)
+                    .alias("jardas_recebidas"),
                     (
                         pl.col("yards_gained").sum() / pl.col("play_id").count()
                     ).alias("jardas_por_alvo"),
@@ -453,3 +508,286 @@ with aba_rankings:
                 f"📏 **Jardas/Alvo:** {dados_atleta['jardas_por_alvo']:.2f} | "
                 f"📈 **EPA/Alvo:** {dados_atleta['epa_por_alvo']:.3f}"
             )
+
+
+# ==========================================
+# ABA 3: VISUALIZAÇÕES & ANALYTICS INTERATIVOS
+# ==========================================
+with aba_graficos:
+    st.header("📈 Visualizações Avançadas de Desempenho")
+    st.caption(
+        "Explore relações de eficiência, volume e geração de valor (EPA) com gráficos interativos."
+    )
+
+    tipo_grafico = st.selectbox(
+        "Selecione a Análise Visual:",
+        options=[
+            "Quarterbacks: EPA/Passes vs. Taxa de Sucesso (%)",
+            "Running Backs: Top Eficiência por EPA/Corrida",
+            "Wide Receivers: Alvos Totais vs. Jardas/Alvo",
+            "Tight Ends: Eficiência de EPA por Alvo",
+        ],
+    )
+
+    # 1. GRÁFICO DE DISPERSÃO - QUARTERBACKS
+    if "Quarterbacks" in tipo_grafico:
+        min_qb_passes = st.slider(
+            "Filtrar QBs por mínimo de passes no gráfico:",
+            10,
+            1200,
+            200,
+            10,
+            key="slider_graf_qb",
+        )
+
+        df_qb_plot = (
+            pbp_data.filter(
+                (pl.col("play_type") == "pass")
+                & (pl.col("passer_player_name").is_not_null())
+            )
+            .group_by("passer_player_name")
+            .agg(
+                [
+                    pl.col("posteam").last().alias("time"),
+                    pl.col("play_id").count().alias("tentativas"),
+                    pl.col("epa").mean().alias("epa_por_jogada"),
+                    (
+                        pl.col("epa").filter(pl.col("epa") > 0).count()
+                        / pl.col("play_id").count()
+                    ).alias("taxa_sucesso"),
+                ]
+            )
+            .filter(pl.col("tentativas") >= min_qb_passes)
+            .to_pandas()
+        )
+
+        df_qb_plot["taxa_sucesso"] = df_qb_plot["taxa_sucesso"] * 100
+
+        fig_qb = px.scatter(
+            df_qb_plot,
+            x="taxa_sucesso",
+            y="epa_por_jogada",
+            size="tentativas",
+            color="time",
+            text="passer_player_name",
+            hover_data=["passer_player_name", "time", "tentativas"],
+            labels={
+                "taxa_sucesso": "Taxa de Sucesso (%)",
+                "epa_por_jogada": "EPA Médio por Jogada",
+                "tentativas": "Passes Tentados",
+            },
+            title=f"Eficiência de QBs (Mínimo {min_qb_passes} passes)",
+        )
+
+        fig_qb.update_traces(textposition="top center")
+        fig_qb.add_hline(
+            y=df_qb_plot["epa_por_jogada"].mean(),
+            line_dash="dash",
+            line_color="gray",
+            annotation_text="Média EPA",
+        )
+        fig_qb.add_vline(
+            x=df_qb_plot["taxa_sucesso"].mean(),
+            line_dash="dash",
+            line_color="gray",
+            annotation_text="Média Sucesso",
+        )
+        fig_qb.update_layout(height=600)
+
+        st.plotly_chart(fig_qb, use_container_width=True)
+
+    # 2. GRÁFICO DE BARRAS - RUNNING BACKS (FILTRADO SEM QBS)
+    elif "Running Backs" in tipo_grafico:
+        top_n = st.slider(
+            "Quantidade de RBs no Top Ranking:",
+            5,
+            30,
+            15,
+            5,
+            key="slider_graf_rb",
+        )
+
+        # Filtra e remove os QBs conhecidos que fazem corridas desenhadas/scrambles
+        df_rb_plot = (
+            pbp_data.filter(
+                (pl.col("play_type") == "run")
+                & (pl.col("rusher_player_name").is_not_null())
+                & (pl.col("qb_scramble") == 0)  # Remove scrambles de QB
+                & (
+                    ~pl.col("rusher_player_name").is_in(
+                        [
+                            "P.Mahomes",
+                            "J.Allen",
+                            "B.Purdy",
+                            "B.Mayfield",
+                            "D.Maye",
+                            "J.Daniels",
+                            "D.Jones",
+                            "J.Herbert",
+                            "B.Nix",
+                            "J.Hurts",
+                            "T.Lawrence",
+                            "A.Richardson",
+                            "C.Stroud",
+                            "L.Jackson",
+                            "K.Murray",
+                            "C.Williams",
+                            "J.Fields",
+                            "T.Hill",
+                        ]
+                    )
+                )
+            )
+            .group_by("rusher_player_name")
+            .agg(
+                [
+                    pl.col("posteam").last().alias("time"),
+                    pl.col("play_id").count().alias("carregadas"),
+                    pl.col("yards_gained").sum().alias("jardas_totais"),
+                    pl.col("epa").mean().alias("epa_por_corrida"),
+                ]
+            )
+            .filter(pl.col("carregadas") >= 50)
+            .sort("epa_por_corrida", descending=True)
+            .limit(top_n)
+            .to_pandas()
+        )
+
+        fig_rb = px.bar(
+            df_rb_plot,
+            x="epa_por_corrida",
+            y="rusher_player_name",
+            orientation="h",
+            color="epa_por_corrida",
+            color_continuous_scale="RdYlGn",
+            text_auto=".3f",
+            hover_data=["time", "carregadas", "jardas_totais"],
+            labels={
+                "epa_por_corrida": "EPA Médio por Corrida",
+                "rusher_player_name": "Running Back",
+            },
+            title=f"Top {top_n} Running Backs Mais Eficientes em EPA por Corrida (Mínimo 50 carregadas)",
+        )
+
+        fig_rb.update_layout(
+            yaxis={"categoryorder": "total ascending"}, height=600
+        )
+
+        st.plotly_chart(fig_rb, use_container_width=True)
+
+    # 3. GRÁFICO DE DISPERSÃO - WIDE RECEIVERS
+    elif "Wide Receivers" in tipo_grafico:
+        min_rec_alvos = st.slider(
+            "Filtrar WRs por mínimo de alvos no gráfico:",
+            10,
+            400,
+            50,
+            10,
+            key="slider_graf_wr",
+        )
+
+        df_wr_plot = (
+            pbp_data.filter(
+                (pl.col("play_type") == "pass")
+                & (pl.col("receiver_player_name").is_not_null())
+            )
+            .group_by("receiver_player_name")
+            .agg(
+                [
+                    pl.col("posteam").last().alias("time"),
+                    pl.col("play_id").count().alias("alvos"),
+                    pl.col("yards_gained").sum().alias("jardas_totais"),
+                    (
+                        pl.col("yards_gained").sum() / pl.col("play_id").count()
+                    ).alias("jardas_por_alvo"),
+                    pl.col("epa").mean().alias("epa_por_alvo"),
+                ]
+            )
+            .filter(pl.col("alvos") >= min_rec_alvos)
+            .to_pandas()
+        )
+
+        fig_wr = px.scatter(
+            df_wr_plot,
+            x="alvos",
+            y="jardas_por_alvo",
+            size="jardas_totais",
+            color="epa_por_alvo",
+            text="receiver_player_name",
+            color_continuous_scale="Viridis",
+            hover_data=["receiver_player_name", "time", "jardas_totais"],
+            labels={
+                "alvos": "Volume Total de Alvos",
+                "jardas_por_alvo": "Jardas por Alvo (YDS/Target)",
+                "epa_por_alvo": "EPA / Alvo",
+            },
+            title=f"Volume vs Eficiência de WRs (Mínimo {min_rec_alvos} alvos)",
+        )
+
+        fig_wr.update_traces(textposition="top center")
+        fig_wr.update_layout(height=600)
+
+        st.plotly_chart(fig_wr, use_container_width=True)
+
+    # 4. GRÁFICO DE DISPERSÃO - TIGHT ENDS
+    elif "Tight Ends" in tipo_grafico:
+        min_te_alvos = st.slider(
+            "Filtrar TEs por mínimo de alvos no gráfico:",
+            10,
+            300,
+            30,
+            10,
+            key="slider_graf_te",
+        )
+
+        df_te_plot = (
+            pbp_data.filter(
+                (pl.col("play_type") == "pass")
+                & (pl.col("receiver_player_name").is_not_null())
+            )
+            .group_by("receiver_player_name")
+            .agg(
+                [
+                    pl.col("posteam").last().alias("time"),
+                    pl.col("play_id").count().alias("alvos"),
+                    pl.col("complete_pass").sum().alias("recepcoes"),
+                    pl.col("yards_gained").sum().alias("jardas_totais"),
+                    pl.col("epa").mean().alias("epa_por_alvo"),
+                ]
+            )
+            .filter(pl.col("alvos") >= min_te_alvos)
+            .sort("epa_por_alvo", descending=True)
+            .to_pandas()
+        )
+
+        fig_te = px.scatter(
+            df_te_plot,
+            x="alvos",
+            y="epa_por_alvo",
+            size="recepcoes",
+            color="time",
+            text="receiver_player_name",
+            hover_data=[
+                "receiver_player_name",
+                "time",
+                "recepcoes",
+                "jardas_totais",
+            ],
+            labels={
+                "alvos": "Alvos Totais (Targets)",
+                "epa_por_alvo": "EPA Médio por Alvo",
+                "recepcoes": "Recepções",
+            },
+            title=f"Eficiência de Tight Ends por EPA/Alvo (Mínimo {min_te_alvos} alvos)",
+        )
+
+        fig_te.update_traces(textposition="top center")
+        fig_te.add_hline(
+            y=df_te_plot["epa_por_alvo"].mean(),
+            line_dash="dash",
+            line_color="gray",
+            annotation_text="Média EPA",
+        )
+        fig_te.update_layout(height=600)
+
+        st.plotly_chart(fig_te, use_container_width=True)
