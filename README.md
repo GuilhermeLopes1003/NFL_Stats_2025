@@ -2,27 +2,30 @@
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)
 ![Polars](https://img.shields.io/badge/Data%20Engine-Polars-CD7F32?style=flat-square)
+![Plotly](https://img.shields.io/badge/Data%20Viz-Plotly-3F4F75?style=flat-square&logo=plotly)
 ![XGBoost](https://img.shields.io/badge/ML%20Model-XGBoost-green?style=flat-square)
 ![Streamlit](https://img.shields.io/badge/UI-Streamlit-red?style=flat-square)
 
-Dashboard interativo desenvolvido em Python para análise avançada de métricas de desempenho da NFL e simulação preditiva de chamadas de jogada (*Play-Calling*) utilizando Machine Learning.
+Dashboard interativo desenvolvido em Python para análise avançada de métricas de desempenho da NFL, simulação preditiva de chamadas de jogada (*Play-Calling*) utilizando Machine Learning e visualizações interativas de dados.
 
 ---
 
 ## 📌 Sobre o Projeto
 
-O objetivo deste projeto é processar dados brutos de jogada a jogada (*play-by-play*) da NFL (2022–2025) e disponibilizar:
+O objetivo deste projeto é processar dados brutos de jogada a jogada (*play-by-play*) da NFL (2022–2025) e disponibilizar uma plataforma unificada organizada em 3 pilares:
 
-1. **Rankings Dinâmicos de Jogadores (`app.py`):** Análise comparativa por posição (Quarterbacks, Running Backs, Wide Receivers e Tight Ends) focando em eficiência baseada em **EPA (Expected Points Added)** e **Taxa de Sucesso**.
-2. **Simulador Preditivo v2 (`app_v2.py`):** Ferramenta tática baseada em **XGBoost Classifier** para prever em tempo real a probabilidade de uma jogada ser **Passe (1)** ou **Corrida (0)** combinando o contexto situacional com formações pré-snap e estatísticas dinâmicas das equipes.
+1. **🎯 Simulador Preditivo v2 (`app.py`):** Ferramenta tática baseada em **XGBoost Classifier** para prever em tempo real a probabilidade de uma jogada ser **Passe (1)** ou **Corrida (0)** combinando o contexto situacional com formações pré-snap e estatísticas dinâmicas das equipes.
+2. **📊 Rankings Dinâmicos de Jogadores (`app.py`):** Análise comparativa por posição (Quarterbacks, Running Backs, Wide Receivers e Tight Ends) focando em eficiência baseada em **EPA (Expected Points Added)** e **Taxa de Sucesso**.
+3. **📈 Visualizações & Analytics Interativos (`app.py`):** Gráficos interativos de dispersão e barras para explorar relações complexas de volume vs. eficiência por posição (ex: EPA/Jogada vs. Taxa de Sucesso, Jardas por Alvo e EPA/Corrida sem contaminação de scrambles de QBs).
 
 ---
 
 ## ⚙️ Tecnologias Utilizadas
 
 * **[Python 3.10+](https://www.python.org/)** — Linguagem principal
-* **[Streamlit](https://streamlit.io/)** — Interface web interativa (Dashboard v1 e Simulador v2)
+* **[Streamlit](https://streamlit.io/)** — Interface web interativa unificada por abas
 * **[Polars](https://pypolars.org/)** — Manipulação e agregação de dados em alta performance
+* **[Plotly Express](https://plotly.com/python/)** — Criação de gráficos interativos (scatter, bar charts e filtros visuais)
 * **[XGBoost](https://xgboost.readthedocs.io/) & [Scikit-Learn](https://scikit-learn.org/)** — Construção, treinamento e otimização do modelo preditivo (`GridSearchCV`)
 * **[nflreadpy](https://github.com/nflverse/nflreadpy)** — Obtenção dos dados oficiais de *play-by-play* da NFL
 * **[Joblib](https://joblib.readthedocs.io/)** — Persistência e carregamento do modelo treinado
@@ -63,14 +66,14 @@ Treinado com **105.680 jogadas** (2022–2024) e avaliado em **34.502 jogadas** 
 
 ---
 
-## 📊 Métricas Analisadas nos Rankings de Jogadores
+## 📊 Métricas & Visualizações por Posição
 
-| Posição | Métricas Principais | Foco da Análise |
+| Posição | Métricas Principais | Foco da Análise & Visualização |
 | :--- | :--- | :--- |
-| **Quarterbacks (QBs)** | EPA/Jogada & Taxa de Sucesso (%) | Eficiência e consistência no jogo aéreo. |
-| **Running Backs (RBs)** | Taxa de Sucesso (%) & Jardas Totais | Eficiência e volume do jogo terrestre. |
-| **Wide Receivers (WRs)** | Jardas por Alvo (`YDS/Target`) & Catch % | Eficiência ao ser visado pelo QB. |
-| **Tight Ends (TEs)** | Jardas por Alvo (`YDS/Target`) & EPA/Alvo | Impacto em recepções no meio de campo e *Red Zone*. |
+| **Quarterbacks (QBs)** | EPA/Jogada & Taxa de Sucesso (%) | Eficiência e consistência no jogo aéreo via Ranking e Scatter Plot. |
+| **Running Backs (RBs)** | EPA/Corrida & Taxa de Sucesso (%) | Eficiência pura por tentativa (filtrando scrambles/QB runs) via Bar Charts. |
+| **Wide Receivers (WRs)** | Jardas por Alvo (`YDS/Target`) & Catch % | Relação entre Volume de Alvos vs. Eficiência de Jardas por Alvo. |
+| **Tight Ends (TEs)** | Jardas por Alvo (`YDS/Target`) & EPA/Alvo | Impacto na geração de EPA em recepções no meio de campo e *Red Zone*. |
 
 ---
 
@@ -79,23 +82,22 @@ Treinado com **105.680 jogadas** (2022–2024) e avaliado em **34.502 jogadas** 
 ```text
 NFL_Stats_2025/
 ├── 01_explorando_dados.py      # Script de exploração inicial do dataset
-├── 02_ranking_qbs.py          # Laboratório de agregação e ranking de QBs
-├── 03_grafico_qbs.py          # Testes de visualização e gráficos
-├── 04_ranking_rb.py           # Laboratório de agregação e ranking de RBs
-├── 05_ranking_wr.py           # Laboratório de agregação de WRs
-├── 06_ranking_te.py           # Laboratório de agregação de TEs
-├── 09_formation_features_ml.py# Laboratório de testes do XGBoost rebalanceado (v2)
-├── treinar_modelo.py          # Pipeline de ETL, treino e exportação do XGBoost v2 (.joblib)
-├── modelo_pass_run.joblib     # Modelo XGBoost otimizado e serializado (10 features)
-├── app.py                     # Aplicação original (Dashboard de Rankings + Simulador v1)
-├── app_v2.py                  # Interface v2 (Simulador Tático em tempo real com estatísticas de times)
-└── README.md                  # Documentação do projeto
+├── 02_ranking_qbs.py           # Laboratório de agregação e ranking de QBs
+├── 03_grafico_qbs.py           # Testes de visualização e gráficos Plotly
+├── 04_ranking_rb.py            # Laboratório de agregação e ranking de RBs
+├── 05_ranking_wr.py            # Laboratório de agregação de WRs
+├── 06_ranking_te.py            # Laboratório de agregação de TEs
+├── 09_formation_features_ml.py # Laboratório de testes do XGBoost rebalanceado (v2)
+├── treinar_modelo.py           # Pipeline de ETL, treino e exportação do XGBoost v2 (.joblib)
+├── modelo_pass_run.joblib      # Modelo XGBoost otimizado e serializado (10 features)
+├── app.py                      # Aplicação principal unificada (Simulador v2 + Rankings + Analytics)
+└── README.md                   # Documentação do projeto
 ```
 ##  Como Executar o Projeto
 
 ### 1. Instalar as dependências:
 ```sh
-pip install streamlit polars nflreadpy scikit-learn xgboost joblib pandas
+pip install streamlit polars plotly nflreadpy scikit-learn xgboost joblib pandas
 ```
 ### 2.Treinar e gerar o modelo de ML:
 ```sh
